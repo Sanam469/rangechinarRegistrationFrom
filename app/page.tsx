@@ -21,9 +21,11 @@ const registrationSchema = z.object({
   selected_events: z.array(z.string()),
   attend_day1: z.boolean(),
   attend_day2: z.boolean(),
+
   agree_to_rules: z.boolean().refine(val => val === true, {
     message: "You must agree to the event rules"
-  })
+  }),
+ photo: z.instanceof(File).nullable().optional()
 });
 
 type RegistrationData = z.input<typeof registrationSchema>;
@@ -36,6 +38,8 @@ interface Event {
   fee: number;
   category: string;
   day: string; // "1", "2", or "1 2"
+  photo?: File | null; 
+
 }
 
 // Fee categories
@@ -56,6 +60,26 @@ export default function HomePage() {
   const [totalFee, setTotalFee] = useState(0);
   const [entryFee, setEntryFee] = useState(0);
   const [eventsFee, setEventsFee] = useState(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+ const [showPreview, setShowPreview] = useState(false);
+
+const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0] ?? null;
+
+  setForm((prev) => ({
+    ...prev,   // keep all existing fields
+    photo: file // update only photo
+  }));
+
+  setPreviewUrl(file ? URL.createObjectURL(file) : null);
+  setShowPreview(false); // reset preview on new file
+};
+
+
+  const togglePreview = () => setShowPreview((prev) => !prev);
+
+
 
   const [form, setForm] = useState<RegistrationData>({
     first_name: "",
@@ -70,8 +94,11 @@ export default function HomePage() {
     selected_events: [],
     attend_day1: true, // Default to attending day 1
     attend_day2: false,
-    agree_to_rules: false
+    agree_to_rules: false,
+   photo: null, 
   });
+
+   
 
   useEffect(() => {
     fetch("/api/events")
@@ -199,31 +226,62 @@ export default function HomePage() {
     setShowRules(false);
   };
 
-  const handleSubmit = () => {
-    // Validate that at least one day is selected
-    if (!form.attend_day1 && !form.attend_day2) {
-      alert("Please select at least one day to attend");
-      return;
+ const handleSubmit = async () => {
+
+  if (!form.attend_day1 && !form.attend_day2) {
+    alert("Please select at least one day to attend");
+    return;
+  }
+
+ 
+  const result = registrationSchema.safeParse(form);
+  if (!result.success) {
+    console.error("Validation error:", result.error.format());
+    alert(result.error.errors[0].message);
+    return;
+  }
+
+  try {
+   
+    const formData = new FormData();
+
+    if (form.photo) {
+      formData.append("avatar", form.photo);
     }
 
-    const result = registrationSchema.safeParse(form);
-
-    if (!result.success) {
-      console.error("Validation error:", result.error.format());
-      alert(result.error.errors[0].message);
-      return;
-    }
-
-    const transformedData = {
+    
+    const otherData = {
       ...result.data,
       total_fee: totalFee,
       entry_fee: entryFee,
       events_fee: eventsFee
     };
+    formData.append("data", JSON.stringify(otherData));
 
-    localStorage.setItem("registration_data", JSON.stringify(transformedData));
-    router.push("/payment");
-  };
+    
+    const res = await fetch("/api/register", {
+      method: "POST",
+      body: formData
+    });
+
+    if (!res.ok) {
+      const error = await res.text();
+      console.error("Registration failed:", error);
+      alert("Registration failed. Please try again.");
+      return;
+    }
+
+    const responseData = await res.json();
+    console.log("Registration successful:", responseData);
+
+    alert("Registration successful!");
+    router.push("/payment"); 
+  } catch (err) {
+    console.error("Error submitting registration:", err);
+    alert("An error occurred. Please try again.");
+  }
+};
+
 
   const uniqueCategories = ["All", ...new Set(events.map((e) => e.category))];
 
@@ -406,6 +464,58 @@ export default function HomePage() {
               </div>
             )}
           </div>
+
+<div className="flex flex-col items-start gap-2">
+  <label className="font-medium text-gray-700">
+    Upload Your Photo for the Ticket
+  </label>
+
+  <div className="flex items-center gap-2">
+    <label
+      className="cursor-pointer bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600 active:bg-indigo-700 transition-all"
+    >
+      Choose File
+      <input
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+    </label>
+
+    <button
+      type="button"
+      onClick={() => setShowPreview(prev => !prev)}
+      disabled={!form.photo}
+      className={`px-4 py-2 rounded border ${
+        form.photo
+          ? "bg-white text-indigo-700 border-indigo-500 hover:bg-indigo-50"
+          : "bg-gray-200 text-gray-400 cursor-not-allowed"
+      } transition-all`}
+    >
+      Preview
+    </button>
+  </div>
+
+  {/* Selected file name */}
+  {form.photo && (
+    <p className="text-sm text-gray-700 mt-1">Selected file: {form.photo.name}</p>
+  )}
+
+  {/* Image preview */}
+  {showPreview && previewUrl && (
+    <img
+      src={previewUrl}
+      alt="Ticket Preview"
+      className="mt-2 w-32 h-32 object-cover rounded border"
+    />
+  )}
+</div>
+
+
+
+
+
         </div>
 
         {/* Day Selection */}
